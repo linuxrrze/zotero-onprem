@@ -224,6 +224,9 @@ networks:
     ipam:
       config:
         - subnet: 172.30.80.0/24
+          # Dynamic addresses only from the upper half, so they can never take
+          # the fixed address of caddy (172.30.80.10) before it starts.
+          ip_range: 172.30.80.128/25
 
 volumes:
   mysql-data:
