@@ -9,6 +9,8 @@ ARG DATASERVER_REPO=https://github.com/zotero/dataserver.git
 # Pinned upstream commit the patches were made against (2026-11-12).
 ARG DATASERVER_REF=bdc2dc713ff3ceb26dc2d3e1b0f5c30dc1020627
 
+# memcached is built from source with igbinary support: the dataserver sets
+# Memcached::SERIALIZER_IGBINARY, which a plain "pecl install" leaves out.
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
@@ -16,15 +18,20 @@ RUN set -eux; \
         libicu-dev libzip-dev libxml2-dev libxslt1-dev libcurl4-openssl-dev \
         libmemcached-dev zlib1g-dev libssl-dev; \
     docker-php-ext-install -j"$(nproc)" mysqli pdo_mysql intl zip bcmath xsl pcntl sockets; \
-    pecl install igbinary memcached redis ds; \
+    pecl install igbinary redis ds; \
+    pecl bundle -d /tmp/pecl memcached; \
+    ( cd /tmp/pecl/memcached && phpize && ./configure --enable-memcached-igbinary \
+      && make -j"$(nproc)" && make install ); \
     docker-php-ext-enable igbinary memcached redis ds; \
-    rm -rf /var/lib/apt/lists/* /tmp/pear
+    php -r 'exit(Memcached::HAVE_IGBINARY ? 0 : 1);'; \
+    rm -rf /var/lib/apt/lists/* /tmp/pear /tmp/pecl
 
 COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
 
 # PHP settings required by the dataserver (it uses short open tags: "<?")
 RUN { \
       echo 'short_open_tag = On'; \
+      echo 'include_path = ".:/usr/local/lib/php:/var/www/zotero/include"'; \
       echo 'memory_limit = 1G'; \
       echo 'max_execution_time = 300'; \
       echo 'post_max_size = 64M'; \
