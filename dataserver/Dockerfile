@@ -42,6 +42,15 @@ RUN set -eux; \
     git fetch -q --depth 1 origin "$DATASERVER_REF"; \
     git checkout -q FETCH_HEAD; \
     git submodule update -q --init --depth 1
+# Zend Framework 1 (only Zend_Db is used). Upstream expects it to be dropped
+# into include/Zend by hand; the original ZF1 is EOL, so use the maintained
+# PHP 8 compatible fork zf1-future.
+ARG ZF1_VERSION=1.25.2
+RUN set -eux; \
+    curl -fsSL "https://codeload.github.com/Shardj/zf1-future/tar.gz/refs/tags/release-${ZF1_VERSION}" \
+      | tar -xz -C include --strip-components=2 "zf1-future-release-${ZF1_VERSION}/library/Zend"; \
+    test -f include/Zend/Db/Adapter/Mysqli.php
+
 COPY patches/ /tmp/patches/
 RUN set -eux; \
     for p in /tmp/patches/*.patch; do echo "Applying $p"; git apply --whitespace=nowarn "$p"; done; \
