@@ -97,8 +97,32 @@ logging in, Zotero is linked and syncs. Details: [client/README.md](client/READM
 ./bin/zotadm group list
 ```
 
-With `LOGIN_AUTH_BACKENDS=ldap` (or `local,ldap`), directory users are created
-automatically on their first login, so no `user add` is needed.
+`user disable` blocks the login page, revokes the user's API keys and sets the
+ban flag the dataserver checks on every request (cached for up to 5 minutes).
+
+## Authentication
+
+`LOGIN_AUTH_BACKENDS` selects how the login page authenticates (any combination):
+
+| Backend | Accounts | Notes |
+|---|---|---|
+| `local` | created with `zotadm user add` | keep for admins / emergencies |
+| `ldap` | created on first login | the directory certificate is always verified (`ldaps://`, or `ldap://` + `LDAP_STARTTLS=1`; private CA via `LDAP_CA_CERT=/certs/…`) |
+| `oidc` | created on first login | single sign-on via the institution's OpenID Connect IdP (Keycloak, Entra ID, Shibboleth IdP OIDC plugin, …) |
+
+**OIDC:** register a confidential client at the IdP with the redirect URI
+`https://ZOTERO_HOST/login/oidc/callback`, then set `OIDC_ISSUER`,
+`OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` (see `.env.example`). Accounts are
+matched by the IdP's stable subject (issuer + `sub`), never by username or
+e-mail; the e-mail address is refreshed on each login. Restrict access with
+`OIDC_ALLOWED_CLAIM` / `OIDC_ALLOWED_VALUES` (e.g. `eduperson_affiliation` =
+`student,staff`). After the IdP login the user confirms on a page naming the
+account that the Zotero client is about to be linked to, so a forwarded login
+link cannot silently hand out a key.
+
+Keys never expire on their own and are not revoked by logging out at the IdP;
+use `zotadm user disable`. The proxy blocks the legacy `POST /keys`
+(username/password in the client), so every login goes through this page.
 
 ## Backup
 
@@ -124,7 +148,7 @@ Back up the two volumes that hold state, at the same moment if you can:
 
 | Workflow | What it does |
 |---|---|
-| `.github/workflows/server.yml` | Starts the whole stack on a runner, once per S3 backend, and runs `tests/e2e.py`. The test covers browser login, API key, item creation, file upload to S3 and download, deduplication, the stream WebSocket, and that the proxy blocks internal endpoints. If it passes, builds `linux/amd64` + `linux/arm64` images and pushes them to GHCR. Runs on push, on PRs (test only) and weekly. |
+| `.github/workflows/server.yml` | Starts the whole stack on a runner, once per S3 backend, and runs `tests/e2e.py`. The test covers browser login (password and OIDC single sign-on against a mock IdP, `tests/compose.ci.yml`), API key, item creation, file upload to S3 and download, deduplication, the stream WebSocket, disabled accounts, and that the proxy blocks internal endpoints. If it passes, builds `linux/amd64` + `linux/arm64` images and pushes them to GHCR. Runs on push, on PRs (test only) and weekly. |
 | `.github/workflows/client.yml` | Downloads the **official** Zotero release and adds the AutoConfig files for your server. Outputs: Linux x86_64/arm64 tarballs, Windows portable zip, Windows silent-install kit (`setup.exe` + `install.ps1` for GPO/Intune/SCCM), macOS kit. Checks daily and publishes a `client-<version>` release whenever Zotero ships a new version. Needs the repository variable `ZOTERO_HOST`. |
 
 The client packages can also be built locally:
@@ -137,7 +161,7 @@ docker-compose.yml        stack definition
 .env.example              configuration template
 bin/setup.sh, bin/zotadm  setup and administration
 dataserver/               Dockerfile, config (env-driven), patches, DB init + zotero_www schema
-login/                    login page for Zotero ≥ 9 (Flask), zotadm CLI, optional LDAP
+login/                    login page for Zotero ≥ 9 (Flask), zotadm CLI, LDAP and OIDC
 stream-server/            Dockerfile (upstream)
 tinymce-clean-server/     Dockerfile (upstream)
 proxy/Caddyfile           TLS + routing, blocks super-user access from outside

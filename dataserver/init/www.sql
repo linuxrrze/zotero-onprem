@@ -39,6 +39,19 @@ CREATE TABLE IF NOT EXISTS `users_meta` (
   KEY `metaKey` (`metaKey`,`metaValue`(20))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- [on-prem] Stable external identities (OIDC issuer+subject, ...) -> userID.
+-- Users are matched by this, never by username or e-mail, so a recycled
+-- username at the identity provider cannot inherit someone else's library.
+CREATE TABLE IF NOT EXISTS `users_external` (
+  `authSource` varchar(20) NOT NULL,
+  `externalID` varchar(255) COLLATE utf8mb4_bin NOT NULL,
+  `userID` int(10) unsigned NOT NULL,
+  `dateAdded` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `lastLogin` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`authSource`,`externalID`),
+  KEY `userID` (`userID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Web session lookup (website cookie auth) -- unused on-premise but queried
 CREATE TABLE IF NOT EXISTS `sessions` (
   `id` varchar(128) NOT NULL,

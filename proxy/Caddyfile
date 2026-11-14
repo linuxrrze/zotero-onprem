@@ -30,6 +30,15 @@
 	@internal path /keys/sessions/complete /keys/sessions/*/info /users/*/storageadmin /storagepurge /users/*/removestoragefiles
 	respond @internal "Forbidden" 403
 
+	# Legacy key creation from username/password (POST /keys {username, password}).
+	# It bypasses the login page (throttling, SSO, disabled accounts); Zotero >= 9
+	# links accounts through the browser login (/keys/sessions) instead.
+	@legacykeys {
+		method POST
+		path /keys /keys/
+	}
+	respond @legacykeys "Forbidden" 403
+
 	request_body {
 		max_size 100MB
 	}

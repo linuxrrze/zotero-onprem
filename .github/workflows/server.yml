@@ -31,10 +31,10 @@ jobs:
           - { s3: garage, port: 3900 }
           - { s3: rustfs, port: 9000 }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Configure test hosts
-        run: echo "127.0.0.1 zotero.test s3.zotero.test" | sudo tee -a /etc/hosts
+        run: echo "127.0.0.1 zotero.test s3.zotero.test mock-oidc" | sudo tee -a /etc/hosts
 
       - name: Create .env
         run: |
@@ -42,7 +42,15 @@ jobs:
           sed -i -e 's/^ZOTERO_HOST=.*/ZOTERO_HOST=zotero.test/' \
                  -e 's/^S3_HOST=.*/S3_HOST=s3.zotero.test/' \
                  -e 's/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=${{ matrix.s3 }}/' \
-                 -e 's/^S3_BACKEND_PORT=.*/S3_BACKEND_PORT=${{ matrix.port }}/' .env
+                 -e 's/^S3_BACKEND_PORT=.*/S3_BACKEND_PORT=${{ matrix.port }}/' \
+                 -e 's/^LOGIN_AUTH_BACKENDS=.*/LOGIN_AUTH_BACKENDS=local,oidc/' \
+                 -e 's#^OIDC_ISSUER=.*#OIDC_ISSUER=http://mock-oidc:8080/zotero#' \
+                 -e 's/^OIDC_CLIENT_ID=.*/OIDC_CLIENT_ID=zotero-onprem/' \
+                 -e 's/^OIDC_CLIENT_SECRET=.*/OIDC_CLIENT_SECRET=ci-only-secret/' \
+                 -e 's/^OIDC_ALLOWED_CLAIM=.*/OIDC_ALLOWED_CLAIM=eduperson_affiliation/' \
+                 -e 's/^OIDC_ALLOWED_VALUES=.*/OIDC_ALLOWED_VALUES=student,staff/' .env
+          # CI-only services (mock OIDC provider), see tests/compose.ci.yml
+          echo "COMPOSE_FILE=docker-compose.yml:tests/compose.ci.yml" >> .env
 
       - name: Build and start stack
         run: ./bin/setup.sh
@@ -69,6 +77,8 @@ jobs:
           ZOTERO_HOST: zotero.test
           E2E_USER: alice
           E2E_PASSWORD: e2e-Passw0rd!
+          E2E_OIDC: "1"
+          E2E_ZOTADM: ./bin/zotadm
         run: |
           pip install --quiet requests websockets
           python tests/e2e.py
@@ -94,7 +104,7 @@ jobs:
           - { image: tinymce-clean, context: tinymce-clean-server }
           - { image: login, context: login }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Image name (lower-case)
         id: name

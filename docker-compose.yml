@@ -162,6 +162,23 @@ services:
       LDAP_USER_FILTER: ${LDAP_USER_FILTER:-}
       LDAP_USERNAME_ATTR: ${LDAP_USERNAME_ATTR:-uid}
       LDAP_EMAIL_ATTR: ${LDAP_EMAIL_ATTR:-mail}
+      LDAP_STARTTLS: ${LDAP_STARTTLS:-0}
+      LDAP_CA_CERT: ${LDAP_CA_CERT:-}
+      LDAP_ALLOW_PLAINTEXT: ${LDAP_ALLOW_PLAINTEXT:-0}
+      LOGIN_BASE_URL: https://${ZOTERO_HOST}/
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_SCOPES: ${OIDC_SCOPES:-openid email profile}
+      OIDC_USERNAME_CLAIM: ${OIDC_USERNAME_CLAIM:-preferred_username}
+      OIDC_EMAIL_CLAIM: ${OIDC_EMAIL_CLAIM:-email}
+      OIDC_FETCH_USERINFO: ${OIDC_FETCH_USERINFO:-1}
+      OIDC_ALLOWED_CLAIM: ${OIDC_ALLOWED_CLAIM:-}
+      OIDC_ALLOWED_VALUES: ${OIDC_ALLOWED_VALUES:-}
+      OIDC_BUTTON_LABEL: ${OIDC_BUTTON_LABEL:-Log in with your university account}
+    volumes:
+      # CA certificates for LDAP_CA_CERT (e.g. /certs/ldap-ca.pem)
+      - ./certs:/certs:ro
     depends_on:
       dataserver: { condition: service_started }
 

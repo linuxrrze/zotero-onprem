@@ -35,7 +35,7 @@ jobs:
       HOST: ${{ inputs.host || vars.ZOTERO_HOST }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Check configuration
         run: |

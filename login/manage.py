@@ -66,16 +66,31 @@ def cmd_user(args, conn):
                 print(f"{r['userID']:>6}  {r['username']:<24} {r['email']:<32} {r['role']:<8} {r['authSource']}")
     elif args.action in ("disable", "enable"):
         u = user_id(conn, args.username)
-        role = "deleted" if args.action == "disable" else "normal"
-        with conn.cursor() as cur:
-            cur.execute("UPDATE users SET role=%s WHERE userID=%s", (role, u["userID"]))
-        if args.action == "disable":
-            # Revoke existing API keys so running clients stop syncing
+        disable = args.action == "disable"
+        revoked = 0
+        if disable:
+            # Revoke existing API keys so running clients stop syncing. This
+            # must happen before the ban: the dataserver answers 404 for
+            # /users/<banned user>/... even to the super-user.
             r = common.api("GET", f"users/{u['userID']}/keys")
-            if r.ok:
-                for k in r.json():
-                    common.api("DELETE", f"keys/{k['key']}")
-        print(f"user {args.username} {args.action}d")
+            if r.status_code == 404:
+                keys = []  # never synced: no dataserver account, no keys
+            elif r.ok:
+                keys = r.json()
+            else:
+                die(f"listing API keys failed: HTTP {r.status_code} {r.text[:300]}")
+            for k in keys:
+                d = common.api("DELETE", f"keys/{k['key']}")
+                if not d.ok:
+                    die(f"revoking key {k['key'][:4]}… failed: HTTP {d.status_code}")
+                revoked += 1
+        with conn.cursor() as cur:
+            # role='deleted' blocks the login page; the dataserver itself only
+            # honours GDN_User.Banned (Zotero_Users::isValidUser) -- set both.
+            cur.execute("UPDATE users SET role=%s WHERE userID=%s",
+                        ("deleted" if disable else "normal", u["userID"]))
+        common.set_banned(conn, u["userID"], disable)
+        print(f"user {args.username} {args.action}d" + (f", {revoked} API key(s) revoked" if disable else ""))
     elif args.action == "quota":
         u = user_id(conn, args.username)
         # far-future expiration; 'unlimited' is understood by the dataserver

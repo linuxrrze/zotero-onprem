@@ -55,6 +55,10 @@ else
 			VALUES ('$DEFAULT_STORAGE_DOMAIN_REGEX', '', $DEFAULT_STORAGE_QUOTA_MB);"
 fi
 
+# www.sql only has CREATE TABLE IF NOT EXISTS: re-applying it on every start
+# adds tables introduced by later versions of this repository.
+mysql_root zotero_www < /opt/zotero-init/www.sql
+
 echo "[init] granting privileges to $MYSQL_USER"
 mysql_root -e "CREATE USER IF NOT EXISTS '$MYSQL_USER'@'%' IDENTIFIED BY '$MYSQL_PASSWORD'"
 for db in zotero_master zotero_shard_1 zotero_shard_2 zotero_ids zotero_www; do

@@ -8,6 +8,10 @@ Zotero desktop client:
   3. file sync       authorise upload -> POST to S3 (presigned policy) -> register -> download
   4. push            WebSocket connect to the stream server
 
+  5. account admin   legacy POST /keys blocked; with E2E_OIDC=1: single sign-on via
+                     the mock IdP, confirmation step, stable account mapping, and
+                     (E2E_ZOTADM=./bin/zotadm) disabled accounts are locked out
+
 Usage: ZOTERO_HOST=zotero.test E2E_USER=alice E2E_PASSWORD=... python tests/e2e.py
 Requires: pip install requests websockets
 """
@@ -59,18 +63,14 @@ def main():
     r = s.get(API + "users/1/keys", headers=H, auth=("x", "y"))
     check(r.status_code == 403, "HTTP Basic auth rejected", r)
 
-    step("Login session (what Zotero ≥ 9 does on 'Log In')")
-    r = s.post(API + "keys/sessions", headers=H)
-    check(r.status_code == 201, "POST /keys/sessions", r)
-    sess = r.json()
-    token, login_url = sess["sessionToken"], sess["loginURL"]
-    check(login_url.startswith(f"https://{HOST}/login?session="), f"loginURL = {login_url}")
+    r = s.post(API + "keys", headers=H, json={"username": USER, "password": PASSWORD,
+                                              "name": "x", "access": {"user": {"library": True}}})
+    check(r.status_code == 403, "legacy password key creation (POST /keys) blocked", r)
 
-    browser = requests.Session()
-    browser.verify = VERIFY
-    r = browser.get(login_url)
-    check(r.status_code == 200 and 'name="password"' in r.text, "login page renders", r)
-    csrf = re.search(r'name="csrf" value="([^"]+)"', r.text).group(1)
+    step("Login session (what Zotero ≥ 9 does on 'Log In')")
+    token, browser, r = start_login(s)
+    check('name="password"' in r.text, "login page shows password form", r)
+    csrf = csrf_of(r)
 
     r = browser.post(f"https://{HOST}/login", data={
         "csrf": csrf, "session": token, "username": USER, "password": "wrong-password"})
@@ -80,11 +80,7 @@ def main():
         "csrf": csrf, "session": token, "username": USER, "password": PASSWORD})
     check(r.status_code == 200 and "You are logged in" in r.text, "login form accepted", r)
 
-    r = s.get(API + f"keys/sessions/{token}", headers=H)
-    check(r.status_code == 200 and r.json().get("status") == "completed", "session completed", r)
-    info = r.json()
-    key, user_id = info["apiKey"], info["userID"]
-    check(bool(key) and user_id, f"got API key for userID {user_id}")
+    key, user_id = session_key(s, token)
     A = dict(H, **{"Zotero-API-Key": key})
 
     r = s.get(API + "keys/current", headers=A)
@@ -123,14 +119,99 @@ def main():
     r = requests.get(loc, verify=VERIFY)
     check(r.status_code == 200 and r.content == content, f"downloaded file matches ({loc.split('?')[0]})", r)
 
-    r = s.post(file_url, headers=dict(A, **{"If-None-Match": "*"}), data={
+    # Deduplication: another attachment with identical content needs no upload
+    r = s.post(API + f"users/{user_id}/items", headers=A, json=item)
+    check(r.status_code == 200 and r.json().get("successful"), "second attachment item", r)
+    file_url2 = API + f"users/{user_id}/items/{r.json()['successful']['0']['key']}/file"
+    r = s.post(file_url2, headers=dict(A, **{"If-None-Match": "*"}), data={
         "md5": md5, "filename": "e2e.txt", "filesize": len(content), "mtime": int(time.time() * 1000)})
     check(r.status_code == 200 and r.json().get("exists") == 1, "deduplication: existing file recognised", r)
 
     step("Push: stream server WebSocket")
     asyncio.run(stream_check(key))
 
+    if os.environ.get("E2E_OIDC") == "1":
+        oidc_checks(s, user_id)
+
     print("\nALL E2E CHECKS PASSED")
+
+
+def start_login(s):
+    """POST /keys/sessions like the client, open the login page like a browser."""
+    r = s.post(API + "keys/sessions", headers=H)
+    check(r.status_code == 201, "POST /keys/sessions", r)
+    sess = r.json()
+    token, login_url = sess["sessionToken"], sess["loginURL"]
+    check(login_url.startswith(f"https://{HOST}/login?session="), f"loginURL = {login_url}")
+    browser = requests.Session()
+    browser.verify = VERIFY
+    r = browser.get(login_url)
+    check(r.status_code == 200 and "asks to be linked" in r.text, "login page renders (shows client)", r)
+    return token, browser, r
+
+
+def csrf_of(r):
+    return re.search(r'name="csrf" value="([^"]+)"', r.text).group(1)
+
+
+def session_key(s, token):
+    r = s.get(API + f"keys/sessions/{token}", headers=H)
+    check(r.status_code == 200 and r.json().get("status") == "completed", "session completed", r)
+    info = r.json()
+    key, user_id = info["apiKey"], info["userID"]
+    check(bool(key) and user_id, f"got API key for userID {user_id}")
+    return key, user_id
+
+
+def oidc_login(s):
+    """Login via the identity provider; returns (session token, browser, response)."""
+    token, browser, r = start_login(s)
+    check('href="login/oidc?session=' in r.text, "login page offers single sign-on", r)
+    # login/oidc -> IdP authorize -> back to login/oidc/callback -> confirmation page
+    r = browser.get(f"https://{HOST}/login/oidc?session={token}")
+    return token, browser, r
+
+
+def oidc_checks(s, local_user_id):
+    """Needs the mock IdP from tests/compose.ci.yml (user "bob") and, for the
+    disable check, E2E_ZOTADM (e.g. ./bin/zotadm)."""
+    step("OIDC single sign-on (mock identity provider)")
+    token, browser, r = oidc_login(s)
+    check(r.status_code == 200 and "Link Zotero to your account?" in r.text,
+          "IdP round trip ends on the confirmation page", r)
+    check("bob" in r.text, "confirmation names the account", r)
+    r2 = s.get(API + f"keys/sessions/{token}", headers=H)
+    check(r2.json().get("status") == "pending", "no key before the user confirms", r2)
+
+    r = browser.post(f"https://{HOST}/login/confirm", data={"csrf": csrf_of(r), "session": token})
+    check(r.status_code == 200 and "You are logged in as bob" in r.text, "confirmation accepted", r)
+    key, user_id = session_key(s, token)
+    check(user_id != local_user_id, "OIDC user is a separate account")
+    B = dict(H, **{"Zotero-API-Key": key})
+    r = s.get(API + f"users/{user_id}/items", headers=B)
+    check(r.status_code == 200, "OIDC user's key works", r)
+
+    step("OIDC: second login maps to the same account (issuer + sub)")
+    token2, browser, r = oidc_login(s)
+    r = browser.post(f"https://{HOST}/login/confirm", data={"csrf": csrf_of(r), "session": token2})
+    check(r.status_code == 200 and "You are logged in as bob" in r.text, "second login", r)
+    _, user_id2 = session_key(s, token2)
+    check(user_id2 == user_id, f"same userID {user_id2}")
+
+    zotadm = os.environ.get("E2E_ZOTADM")
+    if not zotadm:
+        return
+    import subprocess
+
+    step("Disabled account is locked out")
+    out = subprocess.run([zotadm, "user", "disable", "bob"], capture_output=True, text=True)
+    check(out.returncode == 0, f"zotadm user disable bob: {out.stdout.strip()} {out.stderr.strip()}")
+    r = s.get(API + f"users/{user_id}/items", headers=B)
+    check(r.status_code == 403, "existing key revoked", r)
+    token3, browser, r = oidc_login(s)
+    check(r.status_code == 403 and "disabled" in r.text, "login refused for disabled account", r)
+    out = subprocess.run([zotadm, "user", "enable", "bob"], capture_output=True, text=True)
+    check(out.returncode == 0, "zotadm user enable bob")
 
 
 async def stream_check(key):

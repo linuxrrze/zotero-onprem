@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Link Zotero to your account?</h1>
+<p class="site">{{ site }}</p>
+<p>A Zotero client{% if client %} ({{ client }}){% endif %} asks for full access to the library and groups of</p>
+<p class="account"><strong>{{ username }}</strong>{% if email %}<br><span class="site">{{ email }}</span>{% endif %}</p>
+<p class="note">Only continue if you just clicked “Log In” in your own Zotero app.</p>
+<form method="post" action="confirm">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="session" value="{{ token }}">
+  <button type="submit">Link Zotero</button>
+</form>
+<form method="post" action="cancel">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="session" value="{{ token }}">
+  <button class="link" type="submit">Cancel</button>
+</form>
+{% endblock %}
