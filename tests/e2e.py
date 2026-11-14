@@ -58,14 +58,18 @@ def main():
     check(r.status_code == 200 and "book" in r.text, "GET /itemTypes", r)
 
     step("Proxy blocks super-user access from outside")
-    r = s.get(API + "keys/sessions/x/info", headers=H)
-    check(r.status_code == 403, "internal endpoint blocked", r)
-    r = s.get(API + "users/1/keys", headers=H, auth=("x", "y"))
-    check(r.status_code == 403, "HTTP Basic auth rejected", r)
+    # The dataserver would answer these with 403 too (wrong/no credentials), so
+    # require the proxy's own response: the request must never reach it.
+    def blocked(r):
+        return r.status_code == 403 and r.text.strip() == "Blocked by proxy"
 
+    r = s.get(API + "keys/sessions/x/info", headers=H)
+    check(blocked(r), "internal endpoint blocked by proxy", r)
+    r = s.get(API + "users/1/keys", headers=H, auth=("x", "y"))
+    check(blocked(r), "HTTP Basic auth blocked by proxy", r)
     r = s.post(API + "keys", headers=H, json={"username": USER, "password": PASSWORD,
                                               "name": "x", "access": {"user": {"library": True}}})
-    check(r.status_code == 403, "legacy password key creation (POST /keys) blocked", r)
+    check(blocked(r), "legacy password key creation (POST /keys) blocked by proxy", r)
 
     step("Login session (what Zotero ≥ 9 does on 'Log In')")
     token, browser, r = start_login(s)

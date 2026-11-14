@@ -22,13 +22,15 @@
 {$ZOTERO_HOST} {
 	import common
 
+	request_body {
+		max_size 100MB
+	}
+
 	# Super-user (HTTP Basic) API access is for internal services only.
 	# Zotero clients authenticate with Zotero-API-Key / Bearer headers.
 	@basicauth header_regexp Authorization (?i)^basic\s
-	respond @basicauth "Forbidden" 403
 
 	@internal path /keys/sessions/complete /keys/sessions/*/info /users/*/storageadmin /storagepurge /users/*/removestoragefiles
-	respond @internal "Forbidden" 403
 
 	# Legacy key creation from username/password (POST /keys {username, password}).
 	# It bypasses the login page (throttling, SSO, disabled accounts); Zotero >= 9
@@ -37,22 +39,26 @@
 		method POST
 		path /keys /keys/
 	}
-	respond @legacykeys "Forbidden" 403
 
-	request_body {
-		max_size 100MB
-	}
+	# "route" keeps the order as written. Without it Caddy sorts "handle" before
+	# "respond", so the catch-all reverse_proxy would answer first and the
+	# blocks above would never apply.
+	route {
+		respond @basicauth "Blocked by proxy" 403
+		respond @internal "Blocked by proxy" 403
+		respond @legacykeys "Blocked by proxy" 403
 
-	handle /login* {
-		reverse_proxy login:8000
-	}
+		handle /login* {
+			reverse_proxy login:8000
+		}
 
-	handle_path /stream/* {
-		reverse_proxy stream-server:8080
-	}
+		handle_path /stream/* {
+			reverse_proxy stream-server:8080
+		}
 
-	handle {
-		reverse_proxy dataserver:80
+		handle {
+			reverse_proxy dataserver:80
+		}
 	}
 }
 
