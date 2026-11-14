@@ -18,8 +18,9 @@
   zotero.org website**. Existing self-host projects (ZotPrime) predate this
   change and only work with Zotero ≤ 8 clients. This repository adds a small
   open replacement for that login page (`login/`).
-* **The server side is all open source (AGPL).** The dataserver needs two small
-  patches: S3-compatible storage and an optional AWS-only full-text component.
+* **The server side is all open source (AGPL).** The dataserver needs three small
+  patches: S3-compatible storage, an optional AWS-only full-text component,
+  and S3 POST-policy fixes for non-AWS object stores.
   Every other AWS dependency is either unused or can be configured away.
 * **The usual building blocks are gone.** MinIO (Docker images stopped in
   October 2025, repository archived in 2026) and LocalStack (account/token
@@ -108,8 +109,12 @@ session completes (`Zotero_Users::addFromWWW`), so a user only has to exist in
 2. `0002-optional-fulltext-indexing-table.patch` (+7 lines). Upstream now
    tracks full-text index state in **DynamoDB** (with a Lambda indexer). With
    `$FULLTEXT_INDEXING_TABLE = ''`, those calls are skipped.
+3. `0003-s3-post-policy-compat.patch` (+6 lines). The upload policy's
+   `content-length-range` was built from the request string (`"123"`), and the
+   expiration used an unpadded hour (`T9:05:00Z`). AWS tolerates both; RustFS
+   (s3s) rejects the policy with `InvalidPolicyDocument`. Now integers and ISO 8601.
 
-Both patches are kept minimal on purpose and apply cleanly to the pinned
+All patches are kept minimal on purpose and apply cleanly to the pinned
 commit (checked with `git apply --check`). ZotPrime instead replaces whole
 upstream files (`ApiController.php`, `Storage.inc.php`, …) with older copies,
 which silently reverts upstream fixes.

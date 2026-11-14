@@ -10,7 +10,7 @@ Background, design decisions and limitations: **[docs/FINDINGS.md](docs/FINDINGS
 
 ```
                        ┌──────────── docker compose ─────────────────────────────────┐
- Zotero desktop ─HTTPS─┤ caddy ─┬─ /            → dataserver (PHP, upstream + 2 patches) │
+ Zotero desktop ─HTTPS─┤ caddy ─┬─ /            → dataserver (PHP, upstream + 3 patches) │
   (stock client,       │ (TLS)  ├─ /login       → login  (replaces zotero.org login page)│
    2 prefs set)        │        ├─ /stream/     → stream-server (WebSocket push)         │
               ─HTTPS───┤        └─ S3 host      → garage | rustfs (S3 object storage)    │

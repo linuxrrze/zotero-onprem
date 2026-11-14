@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 #
 # Zotero dataserver (https://github.com/zotero/dataserver), built from upstream
-# source at a pinned commit, plus two small on-premise patches (see ./patches).
+# source at a pinned commit, plus three small on-premise patches (see ./patches).
 #
 FROM php:8.4-apache-bookworm
 
