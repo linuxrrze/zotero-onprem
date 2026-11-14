@@ -109,10 +109,13 @@ session completes (`Zotero_Users::addFromWWW`), so a user only has to exist in
 2. `0002-optional-fulltext-indexing-table.patch` (+7 lines). Upstream now
    tracks full-text index state in **DynamoDB** (with a Lambda indexer). With
    `$FULLTEXT_INDEXING_TABLE = ''`, those calls are skipped.
-3. `0003-s3-post-policy-compat.patch` (+6 lines). The upload policy's
-   `content-length-range` was built from the request string (`"123"`), and the
-   expiration used an unpadded hour (`T9:05:00Z`). AWS tolerates both; RustFS
-   (s3s) rejects the policy with `InvalidPolicyDocument`. Now integers and ISO 8601.
+3. `0003-s3-post-policy-compat.patch` (+15 lines). Makes the browser-style
+   upload (POST policy) acceptable to S3 implementations other than AWS:
+   `content-length-range` as integers (was the request string `"123"`), an
+   ISO 8601 expiration with zero-padded hour (was `T9:05:00Z`), the canonical
+   final CRLF after the closing multipart boundary (s3s derives the file size
+   from it), and a `bucket` form field (Garage checks the policy's bucket
+   condition only against form fields; added only with `S3_PUBLIC_ENDPOINT`).
 
 All patches are kept minimal on purpose and apply cleanly to the pinned
 commit (checked with `git apply --check`). ZotPrime instead replaces whole

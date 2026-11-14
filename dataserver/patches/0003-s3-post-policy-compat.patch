@@ -1,8 +1,20 @@
 diff --git a/model/Storage.inc.php b/model/Storage.inc.php
-index 4f4e6df..3f38cef 100644
+index 4f4e6df..422fe5c 100644
 --- a/model/Storage.inc.php
 +++ b/model/Storage.inc.php
-@@ -791,14 +791,18 @@ class Zotero_Storage {
+@@ -670,7 +670,10 @@ class Zotero_Storage {
+ 		$prefix .= "--$boundary\r\nContent-Disposition: form-data; name=\"file\"\r\n\r\n";
+ 		
+ 		// Suffix
+-		$suffix = "\r\n--$boundary--";
++		// [on-prem] End with the canonical "--boundary--\r\n": S3 implementations
++		// that derive the file length from Content-Length (RustFS/s3s) count a
++		// missing final CRLF as part of the file and reject the exact size
++		$suffix = "\r\n--$boundary--\r\n";
+ 		
+ 		$attachmentProxy = false;
+ 		try {
+@@ -791,14 +794,18 @@ class Zotero_Storage {
  		
  		$policy = [
  			'expiration' => gmdate(
@@ -23,3 +35,15 @@ index 4f4e6df..3f38cef 100644
  				['success_action_status' => $successStatus],
  				['x-amz-credential' => $credentials],
  				['x-amz-algorithm' => $algorithm],
+@@ -837,6 +844,11 @@ class Zotero_Storage {
+ 			// Necessary for IAM/STS
+ 			$result['x-amz-security-token'] = $securityToken;
+ 		}
++		// [on-prem] Send the bucket as a form field too: some S3 implementations
++		// (Garage) check the policy's "bucket" condition only against form fields
++		if (self::getPublicS3Endpoint()) {
++			$result = ['bucket' => Z_CONFIG::$S3_BUCKET] + $result;
++		}
+ 		return $result;
+ 	}
+ 	
