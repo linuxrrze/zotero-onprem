@@ -80,7 +80,11 @@ else
 fi
 
 echo "== starting stack"
-docker compose up -d
+if ! docker compose up -d; then
+	echo "!! stack failed to start -- output of the init service:" >&2
+	docker compose logs --no-color init >&2 || true
+	exit 1
+fi
 docker compose logs init | tail -n 5
 
 cat <<MSG
