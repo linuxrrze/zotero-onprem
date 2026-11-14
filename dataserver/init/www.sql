@@ -44,14 +44,14 @@ CREATE TABLE IF NOT EXISTS `sessions` (
   `id` varchar(128) NOT NULL,
   `userID` int(10) unsigned NOT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Forum ban flags (queried when adding group members)
 CREATE TABLE IF NOT EXISTS `GDN_User` (
   `UserID` int(10) unsigned NOT NULL,
   `Banned` tinyint(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (`UserID`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Institutional storage quotas. A row matches users whose *validated* e-mail
 -- domain matches `domain` (a regexp, implicit optional subdomain prefix).
@@ -61,11 +61,11 @@ CREATE TABLE IF NOT EXISTS `storage_institutions` (
   `domainBlacklist` varchar(255) NOT NULL DEFAULT '',
   `storageQuota` int(11) NOT NULL,   -- MB
   PRIMARY KEY (`institutionID`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `storage_institution_email` (
   `institutionID` smallint(5) unsigned NOT NULL,
   `email` varchar(255) NOT NULL,
   PRIMARY KEY (`institutionID`,`email`),
   KEY `email` (`email`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
