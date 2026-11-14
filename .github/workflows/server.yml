@@ -53,7 +53,11 @@ jobs:
             curl -fsk https://zotero.test/itemTypes -o /dev/null && exit 0
             sleep 5
           done
-          echo "API did not come up"; exit 1
+          echo "::error::API did not come up"
+          echo "== via caddy:";      curl -sk -i --max-time 10 https://zotero.test/itemTypes | head -c 2000; echo
+          echo "== dataserver direct:"; docker compose exec -T dataserver curl -s -i --max-time 10 http://localhost/itemTypes | head -c 2000; echo
+          docker compose ps -a
+          exit 1
 
       - name: Create test user
         run: ./bin/zotadm user add alice alice@zotero.test --password 'e2e-Passw0rd!'
