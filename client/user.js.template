@@ -1,0 +1,21 @@
+// Zotero on-premise client configuration (per profile).
+// Copy to <Zotero profile dir>/user.js -- applied at every start.
+// Replace ZOTERO_HOST (scripts/configure-profile.* do this for you).
+
+// --- required: sync against the on-premise server ------------------------
+user_pref("extensions.zotero.api.url", "https://ZOTERO_HOST/");
+user_pref("extensions.zotero.streaming.url", "wss://ZOTERO_HOST/stream/");
+
+// --- trust certificates from the OS store (Windows/macOS), e.g. an internal CA
+user_pref("security.enterprise_roots.enabled", true);
+
+// --- optional: avoid zotero.org/third-party services (uncomment as needed) --
+// Translator & citation-style updates from repo.zotero.org
+//user_pref("extensions.zotero.automaticScraperUpdates", false);
+// Retraction Watch checks (queries the API host, which has no such endpoint on-premise)
+user_pref("extensions.zotero.retractions.enabled", false);
+// Send failed-translation reports to zotero.org
+user_pref("extensions.zotero.reportTranslationFailure", false);
+// Application updates from zotero.org (disable for air-gapped networks and
+// roll out updates yourself)
+//user_pref("app.update.auto", false);

@@ -1,0 +1,23 @@
+# Garage (https://garagehq.deuxfleurs.fr) -- S3-compatible object storage for
+# Zotero file attachments and full-text content. Single node, no replication;
+# rely on volume backups (or run a 3-node cluster with replication_factor = 3).
+#
+# Secrets come from the environment: GARAGE_RPC_SECRET, GARAGE_ADMIN_TOKEN.
+
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "lmdb"
+metadata_auto_snapshot_interval = "6h"
+
+replication_factor = 1
+
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "127.0.0.1:3901"
+
+[s3_api]
+# Must match S3_REGION used by the dataserver for request signing
+s3_region = "us-east-1"
+api_bind_addr = "[::]:3900"
+
+[admin]
+api_bind_addr = "[::]:3903"

@@ -1,0 +1,59 @@
+# Reverse proxy / TLS termination for the on-premise Zotero stack.
+#
+#   https://{$ZOTERO_HOST}/          -> dataserver (Zotero Web API v3)
+#   https://{$ZOTERO_HOST}/login     -> zotero-login (browser login for Zotero 9+)
+#   wss://{$ZOTERO_HOST}/stream/     -> stream-server (push notifications)
+#   https://{$S3_HOST}/              -> S3 API (Garage or RustFS) (file up/downloads; needs its own
+#                                       host because presigned URLs sign host and path)
+#
+# CADDY_TLS: "internal" (Caddy's own CA; clients must trust it), or
+#            "/certs/fullchain.pem /certs/privkey.pem" (institutional certificate), or
+#            an e-mail address for ACME (only if Let's Encrypt/ACME can reach you).
+{
+	admin off
+}
+
+(common) {
+	tls {$CADDY_TLS:internal}
+	encode gzip
+	header -Server
+}
+
+{$ZOTERO_HOST} {
+	import common
+
+	# Super-user (HTTP Basic) API access is for internal services only.
+	# Zotero clients authenticate with Zotero-API-Key / Bearer headers.
+	@basicauth header_regexp Authorization (?i)^basic\s
+	respond @basicauth "Forbidden" 403
+
+	@internal path /keys/sessions/complete /keys/sessions/*/info /users/*/storageadmin /storagepurge /users/*/removestoragefiles
+	respond @internal "Forbidden" 403
+
+	request_body {
+		max_size 100MB
+	}
+
+	handle /login* {
+		reverse_proxy login:8000
+	}
+
+	handle_path /stream/* {
+		reverse_proxy stream-server:8080
+	}
+
+	handle {
+		reverse_proxy dataserver:80
+	}
+}
+
+{$S3_HOST} {
+	import common
+
+	request_body {
+		max_size {$S3_MAX_UPLOAD:2GB}
+	}
+
+	# Presigned URLs are signed for this exact Host -- pass it through unchanged
+	reverse_proxy {$S3_UPSTREAM}
+}

@@ -1,0 +1,79 @@
+# Client: pre-configured Zotero packages from the official release binaries
+# (Linux x86_64/arm64, Windows portable + silent-install kit, macOS kit).
+#
+# Set the repository variable ZOTERO_HOST (Settings -> Secrets and variables ->
+# Actions -> Variables). Runs weekly and publishes a release "client-<version>"
+# whenever Zotero ships a new version.
+name: Client packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Zotero version (e.g. 10.0.8) or 'latest'"
+        default: latest
+      host:
+        description: "Server host name (default: repository variable ZOTERO_HOST)"
+        default: ""
+      release:
+        description: "Publish as GitHub release"
+        type: boolean
+        default: true
+  schedule:
+    - cron: "0 5 * * *"
+  push:
+    branches: [main]
+    paths: ["client/**", ".github/workflows/client.yml"]
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    env:
+      HOST: ${{ inputs.host || vars.ZOTERO_HOST }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check configuration
+        run: |
+          [ -n "$HOST" ] || { echo "::error::Set repository variable ZOTERO_HOST"; exit 1; }
+
+      - name: Resolve version
+        id: v
+        run: |
+          v="${{ inputs.version || 'latest' }}"
+          if [ "$v" = latest ]; then
+            v=$(curl -fsSI "https://www.zotero.org/download/client/dl?channel=release&platform=linux-x86_64" \
+                | sed -n 's#^location: .*/release/\([^/]*\)/.*#\1#ip' | tr -d '\r')
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if gh release view "client-$v" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build packages
+        if: github.event_name != 'schedule' || steps.v.outputs.exists != 'true'
+        run: client/scripts/package.sh "$HOST" "${{ steps.v.outputs.version }}" dist
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'schedule' || steps.v.outputs.exists != 'true'
+        with:
+          name: zotero-${{ steps.v.outputs.version }}-onprem
+          path: dist/
+          retention-days: 30
+
+      - name: Publish release
+        if: >-
+          (github.event_name == 'schedule' && steps.v.outputs.exists != 'true') ||
+          (github.event_name == 'workflow_dispatch' && inputs.release)
+        run: |
+          v=${{ steps.v.outputs.version }}
+          notes="Official Zotero $v binaries, pre-configured for https://$HOST/ (AutoConfig, locked prefs). Not recompiled."
+          if gh release view "client-$v" >/dev/null 2>&1; then
+            gh release upload "client-$v" dist/* --clobber
+          else
+            gh release create "client-$v" dist/* --title "Zotero $v (on-premise)" --notes "$notes"
+          fi

@@ -1,0 +1,25 @@
+diff --git a/model/Libraries.inc.php b/model/Libraries.inc.php
+index c12588d..d40860b 100644
+--- a/model/Libraries.inc.php
++++ b/model/Libraries.inc.php
+@@ -67,6 +67,10 @@ class Zotero_Libraries {
+ 	 *   refill completes.
+ 	 */
+ 	public static function getFullTextIndexState($libraryID) {
++		// [on-prem] No DynamoDB/Lambda full-text indexing pipeline configured
++		if (empty(Z_CONFIG::$FULLTEXT_INDEXING_TABLE)) {
++			return ['deindexed' => false, 'reindexing' => null, 'indexableCount' => null];
++		}
+ 		$ddb = Z_Core::$AWS->createDynamoDb();
+ 		$result = $ddb->getItem([
+ 			'TableName' => Z_CONFIG::$FULLTEXT_INDEXING_TABLE,
+@@ -98,6 +102,9 @@ class Zotero_Libraries {
+ 	 * Returns false if another request claimed the rebuild first
+ 	 */
+ 	public static function claimFullTextReindex($libraryID, $staleReindexTime = null) {
++		if (empty(Z_CONFIG::$FULLTEXT_INDEXING_TABLE)) {
++			return false;
++		}
+ 		$ddb = Z_Core::$AWS->createDynamoDb();
+ 		$params = [
+ 			'TableName' => Z_CONFIG::$FULLTEXT_INDEXING_TABLE,

@@ -1,0 +1,61 @@
+diff --git a/include/header.inc.php b/include/header.inc.php
+index 4f41b3a..17f7f1b 100644
+--- a/include/header.inc.php
++++ b/include/header.inc.php
+@@ -254,6 +254,12 @@ else {
+ 		'secret' => Z_CONFIG::$AWS_SECRET_KEY
+ 	];
+ }
++// [on-prem] Optional per-service overrides, e.g. to point S3 at an S3-compatible
++// on-premise object store:
++//   public static $AWS_SERVICE_CONFIG = ['S3' => ['endpoint' => 'http://s3:3900', 'use_path_style_endpoint' => true]];
++if (property_exists('Z_CONFIG', 'AWS_SERVICE_CONFIG') && !empty(Z_CONFIG::$AWS_SERVICE_CONFIG)) {
++	$awsConfig = array_replace_recursive($awsConfig, Z_CONFIG::$AWS_SERVICE_CONFIG);
++}
+ Z_Core::$AWS = new Aws\Sdk($awsConfig);
+ unset($awsConfig);
+ 
+diff --git a/model/Storage.inc.php b/model/Storage.inc.php
+index 3b56b55..4f4e6df 100644
+--- a/model/Storage.inc.php
++++ b/model/Storage.inc.php
+@@ -114,6 +114,13 @@ class Zotero_Storage {
+ 			}
+ 		}
+ 		
++		// [on-prem] Presign download URLs against the client-facing endpoint
++		if ($publicEndpoint = self::getPublicS3Endpoint()) {
++			$s3Client = Z_Core::$AWS->createS3([
++				'endpoint' => $publicEndpoint,
++				'use_path_style_endpoint' => true
++			]);
++		}
+ 		$cmd = $s3Client->getCommand('GetObject', [
+ 			'Bucket' => Z_CONFIG::$S3_BUCKET,
+ 			'Key' => $key,
+@@ -258,10 +265,25 @@ class Zotero_Storage {
+ 	
+ 	
+ 	public static function getUploadBaseURL() {
++		// [on-prem] Clients upload directly to the object store, so use its public URL
++		if ($endpoint = self::getPublicS3Endpoint()) {
++			return $endpoint . "/" . Z_CONFIG::$S3_BUCKET . "/";
++		}
+ 		return "https://" . Z_CONFIG::$S3_BUCKET . ".s3.amazonaws.com/";
+ 	}
+ 	
+ 	
++	/**
++	 * [on-prem] Client-facing S3 endpoint (e.g. https://s3.zotero.example.org), or false
++	 */
++	public static function getPublicS3Endpoint() {
++		if (property_exists('Z_CONFIG', 'S3_PUBLIC_ENDPOINT') && !empty(Z_CONFIG::$S3_PUBLIC_ENDPOINT)) {
++			return rtrim(Z_CONFIG::$S3_PUBLIC_ENDPOINT, '/');
++		}
++		return false;
++	}
++	
++	
+ 	public static function patchFile($item, $info, $algorithm, $patch) {
+ 		switch ($algorithm) {
+ 			case 'bsdiff':

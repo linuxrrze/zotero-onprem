@@ -1,0 +1,217 @@
+# On-premise Zotero sync server: metadata sync, file storage, groups, push
+# notifications and browser-based login -- no connection to zotero.org needed.
+#
+#   cp .env.example .env && ./bin/setup.sh
+#
+name: zotero
+
+x-dataserver-env: &dataserver-env
+  ZOTERO_API_URL: https://${ZOTERO_HOST}/
+  ZOTERO_WWW_URL: https://${ZOTERO_HOST}/
+  ZOTERO_AUTH_SALT: ${ZOTERO_AUTH_SALT}
+  ZOTERO_SUPER_USER: ${ZOTERO_SUPER_USER}
+  ZOTERO_SUPER_PASSWORD: ${ZOTERO_SUPER_PASSWORD}
+  MYSQL_HOST: mysql
+  MYSQL_USER: ${MYSQL_USER}
+  MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+  S3_INTERNAL_URL: http://s3:${S3_BACKEND_PORT:-3900}
+  S3_PUBLIC_URL: https://${S3_HOST}
+  S3_REGION: us-east-1
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+  S3_SECRET_KEY: ${S3_SECRET_KEY}
+  S3_BUCKET: zotero
+  S3_BUCKET_FULLTEXT: zotero-fulltext
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./mysql/zotero.cnf:/etc/mysql/conf.d/zotero.cnf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  memcached:
+    image: memcached:1.6-alpine
+    restart: unless-stopped
+    command: ["memcached", "-m", "256"]
+
+  # ---- S3 object storage: choose ONE via COMPOSE_PROFILES=garage|rustfs ----
+  # Both are reachable as "s3" inside the stack (port: S3_BACKEND_PORT).
+  garage:
+    image: dxflrs/garage:v2.1.0
+    profiles: ["garage"]
+    restart: unless-stopped
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN}
+    volumes:
+      - ./garage/garage.toml:/etc/garage.toml:ro
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+    networks:
+      default:
+        aliases: [s3]
+
+  rustfs:
+    image: rustfs/rustfs:1.0.5
+    profiles: ["rustfs"]
+    restart: unless-stopped
+    environment:
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_VOLUMES: /data
+      RUSTFS_REGION: us-east-1
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_KEY}
+      RUSTFS_CONSOLE_ENABLE: "false"
+    volumes:
+      - rustfs-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/health"]
+      interval: 10s
+      retries: 10
+    networks:
+      default:
+        aliases: [s3]
+
+  tinymce-clean:
+    build: ./tinymce-clean-server
+    image: ${IMAGE_PREFIX:-zotero-onprem}/tinymce-clean:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+
+  stream-server:
+    build: ./stream-server
+    image: ${IMAGE_PREFIX:-zotero-onprem}/stream-server:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      NODE_CONFIG: >-
+        {"httpPort": 8080,
+         "redis": {"url": "redis://redis:6379", "prefix": ""},
+         "apiURL": "http://dataserver/",
+         "trustedProxies": ["172.30.80.0/24"],
+         "globalTopics": []}
+    depends_on:
+      redis: { condition: service_healthy }
+
+  # One-shot: create databases/schema, grants and run schema updates
+  init:
+    build: ./dataserver
+    image: ${IMAGE_PREFIX:-zotero-onprem}/dataserver:${IMAGE_TAG:-latest}
+    command: ["/opt/zotero-init/init-db.sh"]
+    restart: "no"
+    environment:
+      <<: *dataserver-env
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      DEFAULT_STORAGE_QUOTA_MB: ${DEFAULT_STORAGE_QUOTA_MB:-10000}
+    depends_on:
+      mysql: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      memcached: { condition: service_started }
+
+  dataserver:
+    build: ./dataserver
+    image: ${IMAGE_PREFIX:-zotero-onprem}/dataserver:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment: *dataserver-env
+    depends_on:
+      init: { condition: service_completed_successfully }
+      tinymce-clean: { condition: service_started }
+      garage: { condition: service_started, required: false }
+      rustfs: { condition: service_started, required: false }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost/itemTypes || exit 1"]
+      interval: 15s
+      retries: 10
+      start_period: 20s
+
+  login:
+    build: ./login
+    image: ${IMAGE_PREFIX:-zotero-onprem}/login:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      ZOTERO_API_INTERNAL_URL: http://dataserver/
+      ZOTERO_SUPER_USER: ${ZOTERO_SUPER_USER}
+      ZOTERO_SUPER_PASSWORD: ${ZOTERO_SUPER_PASSWORD}
+      ZOTERO_AUTH_SALT: ${ZOTERO_AUTH_SALT}
+      MYSQL_HOST: mysql
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      LOGIN_SECRET_KEY: ${LOGIN_SECRET_KEY}
+      LOGIN_SITE_NAME: ${LOGIN_SITE_NAME:-Zotero (on-premise)}
+      LOGIN_AUTH_BACKENDS: ${LOGIN_AUTH_BACKENDS:-local}
+      LDAP_URL: ${LDAP_URL:-}
+      LDAP_BIND_DN: ${LDAP_BIND_DN:-}
+      LDAP_BIND_PASSWORD: ${LDAP_BIND_PASSWORD:-}
+      LDAP_SEARCH_BASE: ${LDAP_SEARCH_BASE:-}
+      LDAP_USER_FILTER: ${LDAP_USER_FILTER:-}
+      LDAP_USERNAME_ATTR: ${LDAP_USERNAME_ATTR:-uid}
+      LDAP_EMAIL_ATTR: ${LDAP_EMAIL_ATTR:-mail}
+    depends_on:
+      dataserver: { condition: service_started }
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports:
+      - "443:443"
+      - "80:80"
+    environment:
+      ZOTERO_HOST: ${ZOTERO_HOST}
+      S3_HOST: ${S3_HOST}
+      CADDY_TLS: ${CADDY_TLS:-internal}
+      S3_UPSTREAM: s3:${S3_BACKEND_PORT:-3900}
+    volumes:
+      - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
+      - caddy-data:/data
+    networks:
+      default:
+        ipv4_address: 172.30.80.10
+    depends_on:
+      - dataserver
+      - login
+      - stream-server
+
+  # Optional: only needed for server-side full-text search through the Web API
+  # (qmode=everything). Desktop clients search full text locally. Nothing fills
+  # this index without an indexer -- see docs/FINDINGS.md.
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.29
+    profiles: ["fulltext-search"]
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.30.80.0/24
+
+volumes:
+  mysql-data:
+  garage-meta:
+  garage-data:
+  rustfs-data:
+  caddy-data:
+  es-data:

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Log in to Zotero</h1>
+<p class="site">{{ site }}</p>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+<form method="post" action="login">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="session" value="{{ token }}">
+  <label for="u">Username or e-mail</label>
+  <input id="u" type="text" name="username" value="{{ username or '' }}" autocomplete="username" autofocus required>
+  <label for="p">Password</label>
+  <input id="p" type="password" name="password" autocomplete="current-password" required>
+  <button type="submit">Log in and link Zotero</button>
+</form>
+<form method="post" action="login/cancel">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="session" value="{{ token }}">
+  <button class="link" type="submit">Cancel</button>
+</form>
+{% endblock %}

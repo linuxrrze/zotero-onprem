@@ -1,0 +1,8 @@
+.env
+.env.bak
+certs/*
+!certs/.keep
+__pycache__/
+dist/
+# upstream clone used for investigation, not part of this repo
+zotero__zotero-connectors/

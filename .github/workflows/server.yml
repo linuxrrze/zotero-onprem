@@ -1,0 +1,125 @@
+# Server: end-to-end test of the whole stack (with both S3 backends), then
+# build multi-arch images and push them to GitHub Container Registry.
+#
+# Images: ghcr.io/<owner>/zotero-onprem/{dataserver,stream-server,tinymce-clean,login}
+# Use them with IMAGE_PREFIX / IMAGE_TAG in .env.
+name: Server
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths-ignore: ["client/**", "docs/**", "**.md"]
+  pull_request:
+    paths-ignore: ["client/**", "docs/**", "**.md"]
+  schedule:
+    - cron: "0 4 * * 1"   # weekly: pick up base-image security updates
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: E2E (${{ matrix.s3 }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { s3: garage, port: 3900 }
+          - { s3: rustfs, port: 9000 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure test hosts
+        run: echo "127.0.0.1 zotero.test s3.zotero.test" | sudo tee -a /etc/hosts
+
+      - name: Create .env
+        run: |
+          cp .env.example .env
+          sed -i -e 's/^ZOTERO_HOST=.*/ZOTERO_HOST=zotero.test/' \
+                 -e 's/^S3_HOST=.*/S3_HOST=s3.zotero.test/' \
+                 -e 's/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=${{ matrix.s3 }}/' \
+                 -e 's/^S3_BACKEND_PORT=.*/S3_BACKEND_PORT=${{ matrix.port }}/' .env
+
+      - name: Build and start stack
+        run: ./bin/setup.sh
+
+      - name: Wait for API
+        run: |
+          for i in $(seq 1 90); do
+            curl -fsk https://zotero.test/itemTypes -o /dev/null && exit 0
+            sleep 5
+          done
+          echo "API did not come up"; exit 1
+
+      - name: Create test user
+        run: ./bin/zotadm user add alice alice@zotero.test --password 'e2e-Passw0rd!'
+
+      - name: Run end-to-end test
+        env:
+          ZOTERO_HOST: zotero.test
+          E2E_USER: alice
+          E2E_PASSWORD: e2e-Passw0rd!
+        run: |
+          pip install --quiet requests websockets
+          python tests/e2e.py
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=300
+
+  images:
+    name: Image ${{ matrix.image }}
+    needs: e2e
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: dataserver, context: dataserver }
+          - { image: stream-server, context: stream-server }
+          - { image: tinymce-clean, context: tinymce-clean-server }
+          - { image: login, context: login }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image name (lower-case)
+        id: name
+        run: echo "prefix=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/zotero-onprem" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.name.outputs.prefix }}/${{ matrix.image }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          pull: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
