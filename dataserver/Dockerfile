@@ -31,7 +31,6 @@ COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
 # PHP settings required by the dataserver (it uses short open tags: "<?")
 RUN { \
       echo 'short_open_tag = On'; \
-      echo 'include_path = ".:/usr/local/lib/php:/var/www/zotero/include"'; \
       echo 'memory_limit = 1G'; \
       echo 'max_execution_time = 300'; \
       echo 'post_max_size = 64M'; \
