@@ -65,6 +65,8 @@ def main():
 
     r = s.get(API + "keys/sessions/x/info", headers=H)
     check(blocked(r), "internal endpoint blocked by proxy", r)
+    r = s.get(API + "Keys/Sessions/x/info/", headers=H)
+    check(blocked(r), "case / trailing-slash variant blocked by proxy", r)
     r = s.get(API + "users/1/keys", headers=H, auth=("x", "y"))
     check(blocked(r), "HTTP Basic auth blocked by proxy", r)
     r = s.post(API + "keys", headers=H, json={"username": USER, "password": PASSWORD,
@@ -154,6 +156,12 @@ def start_login(s):
     return token, browser, r
 
 
+def form_action(r):
+    """URL the page's first form posts to, resolved like a browser would."""
+    from urllib.parse import urljoin
+    return urljoin(r.url, re.search(r'<form method="post" action="([^"]+)"', r.text).group(1))
+
+
 def csrf_of(r):
     return re.search(r'name="csrf" value="([^"]+)"', r.text).group(1)
 
@@ -187,7 +195,7 @@ def oidc_checks(s, local_user_id):
     r2 = s.get(API + f"keys/sessions/{token}", headers=H)
     check(r2.json().get("status") == "pending", "no key before the user confirms", r2)
 
-    r = browser.post(f"https://{HOST}/login/confirm", data={"csrf": csrf_of(r), "session": token})
+    r = browser.post(form_action(r), data={"csrf": csrf_of(r), "session": token})
     check(r.status_code == 200 and "You are logged in as bob" in r.text, "confirmation accepted", r)
     key, user_id = session_key(s, token)
     check(user_id != local_user_id, "OIDC user is a separate account")
@@ -197,7 +205,7 @@ def oidc_checks(s, local_user_id):
 
     step("OIDC: second login maps to the same account (issuer + sub)")
     token2, browser, r = oidc_login(s)
-    r = browser.post(f"https://{HOST}/login/confirm", data={"csrf": csrf_of(r), "session": token2})
+    r = browser.post(form_action(r), data={"csrf": csrf_of(r), "session": token2})
     check(r.status_code == 200 and "You are logged in as bob" in r.text, "second login", r)
     _, user_id2 = session_key(s, token2)
     check(user_id2 == user_id, f"same userID {user_id2}")

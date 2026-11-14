@@ -20,6 +20,7 @@ step 3 for an on-premise installation. Backends (LOGIN_AUTH_BACKENDS):
 """
 import logging
 import os
+import re
 import secrets
 import time
 from collections import defaultdict, deque
@@ -85,9 +86,20 @@ def _check_csrf():
         abort(400, "Invalid form token -- please reload the page")
 
 
+# Login session tokens are 32 alphanumeric characters (Zotero_LoginSessions).
+# Anything else must never be put into a dataserver URL: the login service
+# calls the API as super-user, and "../" in a token would reach other
+# endpoints (e.g. DELETE /groups/N).
+_TOKEN_RE = re.compile(r"[A-Za-z0-9]{32}")
+
+
+def _valid_token(token):
+    return bool(token) and _TOKEN_RE.fullmatch(token) is not None
+
+
 def _session_info(token):
-    """Session status from the dataserver, or None if unknown/expired."""
-    if not token:
+    """Session status from the dataserver, or None if unknown/expired/malformed."""
+    if not _valid_token(token):
         return None
     r = common.api("GET", f"keys/sessions/{token}/info")
     if r.status_code in (404, 410):
@@ -317,7 +329,7 @@ def login_cancel():
     _check_csrf()
     token = request.form.get("session", "")
     session.pop("oidc_confirm", None)
-    if token:
+    if _valid_token(token):
         # Unauthenticated endpoint, same call the client makes
         common.api("DELETE", f"keys/sessions/{token}")
     return _message("Login cancelled", "The login was cancelled. You can close this window.")

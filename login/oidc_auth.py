@@ -12,6 +12,8 @@ user confirms that the Zotero client may be linked to the account.
   OIDC_SCOPES          openid email profile          (add e.g. "eduperson_affiliation")
   OIDC_USERNAME_CLAIM  preferred_username            (fallback: e-mail local part, sub)
   OIDC_EMAIL_CLAIM     email
+  OIDC_TRUST_EMAIL     1 = accept e-mail without "email_verified" (institutional
+                       IdPs that only release verified addresses but omit the claim)
   OIDC_FETCH_USERINFO  1 = also read the userinfo endpoint (claims not in the ID token)
   OIDC_ALLOWED_CLAIM   e.g. eduperson_affiliation    (empty = every account may log in)
   OIDC_ALLOWED_VALUES  e.g. student,staff,employee,faculty
@@ -45,6 +47,7 @@ SCOPES = _setting("OIDC_SCOPES", "openid email profile")
 USERNAME_CLAIM = _setting("OIDC_USERNAME_CLAIM", "preferred_username")
 EMAIL_CLAIM = _setting("OIDC_EMAIL_CLAIM", "email")
 FETCH_USERINFO = _setting("OIDC_FETCH_USERINFO", "1") == "1"
+TRUST_EMAIL = _setting("OIDC_TRUST_EMAIL", "0") == "1"
 ALLOWED_CLAIM = _setting("OIDC_ALLOWED_CLAIM")
 ALLOWED_VALUES = {v.strip().lower() for v in _setting("OIDC_ALLOWED_VALUES").split(",") if v.strip()}
 BUTTON_LABEL = _setting("OIDC_BUTTON_LABEL", "Log in with your university account")
@@ -126,7 +129,12 @@ def external_id(claims):
 
 def email_of(claims):
     values = claim_values(claims, EMAIL_CLAIM)
-    if not values or claims.get("email_verified") is False:
+    # A validated address grants the institutional quota and is used for
+    # login-by-e-mail lookups: only accept addresses the IdP has verified
+    # (OIDC_TRUST_EMAIL=1 for IdPs that never send email_verified).
+    verified = claims.get("email_verified") is True or (
+        TRUST_EMAIL and claims.get("email_verified") is None)
+    if not values or not verified:
         return ""
     return values[0].strip()
 

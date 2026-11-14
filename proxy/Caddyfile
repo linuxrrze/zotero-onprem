@@ -30,7 +30,9 @@
 	# Zotero clients authenticate with Zotero-API-Key / Bearer headers.
 	@basicauth header_regexp Authorization (?i)^basic\s
 
-	@internal path /keys/sessions/complete /keys/sessions/*/info /users/*/storageadmin /storagepurge /users/*/removestoragefiles
+	# Case-insensitive, with optional trailing slashes (the dataserver's router
+	# strips them, Caddy's path matcher does not).
+	@internal path_regexp (?i)^/+(storagepurge|keys/sessions/(complete|[^/]+/info)|users/[^/]+/(storageadmin|removestoragefiles))/*$
 
 	# Legacy key creation from username/password (POST /keys {username, password}).
 	# It bypasses the login page (throttling, SSO, disabled accounts); Zotero >= 9
@@ -57,7 +59,12 @@
 		}
 
 		handle {
-			reverse_proxy dataserver:80
+			reverse_proxy dataserver:80 {
+				# The dataserver takes the client IP from Zotero-Forwarded-For
+				# when the connection comes from a private address (always
+				# the case behind this proxy): never pass the client's own value.
+				header_up Zotero-Forwarded-For {client_ip}
+			}
 		}
 	}
 }

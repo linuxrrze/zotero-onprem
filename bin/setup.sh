@@ -10,6 +10,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 [ -f .env ] || cp .env.example .env
+chmod 600 .env   # holds every secret
 
 hex() { openssl rand -hex "$1"; }
 set_secret() {   # set_secret NAME VALUE -- only if empty in .env
