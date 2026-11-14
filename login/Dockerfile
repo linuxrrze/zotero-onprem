@@ -9,4 +9,8 @@ COPY . .
 RUN useradd -r -u 10001 app
 USER app
 EXPOSE 8000
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "--access-logfile", "-", "app:app"]
+# Access log without query string or referer: both carry the login session
+# token (/login?session=...), which can be exchanged for the new API key.
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "--access-logfile", "-", \
+     "--access-logformat", "%(h)s %(l)s %(u)s %(t)s \"%(m)s %(U)s %(H)s\" %(s)s %(b)s \"%(a)s\"", \
+     "app:app"]

@@ -37,6 +37,9 @@ API = f"https://{HOST}/"
 H = {"Zotero-API-Version": "3", "User-Agent": "Zotero/10.0 (e2e test)"}
 
 
+SECRETS = []  # login session tokens and API keys used in this run (must never be logged)
+
+
 def step(msg):
     print(f"\n== {msg}", flush=True)
 
@@ -133,11 +136,39 @@ def main():
         "md5": md5, "filename": "e2e.txt", "filesize": len(content), "mtime": int(time.time() * 1000)})
     check(r.status_code == 200 and r.json().get("exists") == 1, "deduplication: existing file recognised", r)
 
+    step("File sync: object store enforces the declared checksum")
+    # Files are stored once per content hash and shared between users, and the
+    # dataserver only checks size when an upload is registered. If the store
+    # accepted bytes that do not match Content-MD5, a user could plant content
+    # under a hash that someone else's file will later have.
+    r = s.post(API + f"users/{user_id}/items", headers=A, json=item)
+    check(r.status_code == 200 and r.json().get("successful"), "third attachment item", r)
+    file_url3 = API + f"users/{user_id}/items/{r.json()['successful']['0']['key']}/file"
+    declared = f"declared content {time.time()}\n".encode() * 40
+    actual = bytes(b ^ 0x01 for b in declared)  # same length, different bytes
+    r = s.post(file_url3, headers=dict(A, **{"If-None-Match": "*"}), data={
+        "md5": hashlib.md5(declared).hexdigest(), "filename": "e2e.txt",
+        "filesize": len(declared), "mtime": int(time.time() * 1000)})
+    check(r.status_code == 200 and "uploadKey" in r.json(), "upload authorised for declared content", r)
+    auth3 = r.json()
+    r = requests.post(auth3["url"], data=auth3["prefix"].encode() + actual + auth3["suffix"].encode(),
+                      headers={"Content-Type": auth3["contentType"]}, verify=VERIFY)
+    check(r.status_code >= 400, f"mismatching body rejected by the object store (HTTP {r.status_code})", r)
+
     step("Push: stream server WebSocket")
     asyncio.run(stream_check(key))
 
     if os.environ.get("E2E_OIDC") == "1":
         oidc_checks(s, user_id)
+
+    if os.environ.get("E2E_ZOTADM"):  # implies access to the docker compose project
+        step("No login tokens or API keys in container logs")
+        import subprocess
+        logs = subprocess.run(["docker", "compose", "logs", "--no-color", "login", "dataserver", "caddy"],
+                              capture_output=True, text=True).stdout
+        check(len(logs) > 1000, f"read {len(logs)} bytes of logs")
+        leaked = [x[:4] + "…" for x in SECRETS if x in logs]
+        check(not leaked, f"none of {len(SECRETS)} tokens/keys logged" + (f" (leaked: {leaked})" if leaked else ""))
 
     print("\nALL E2E CHECKS PASSED")
 
@@ -148,6 +179,7 @@ def start_login(s):
     check(r.status_code == 201, "POST /keys/sessions", r)
     sess = r.json()
     token, login_url = sess["sessionToken"], sess["loginURL"]
+    SECRETS.append(token)
     check(login_url.startswith(f"https://{HOST}/login?session="), f"loginURL = {login_url}")
     browser = requests.Session()
     browser.verify = VERIFY
@@ -171,6 +203,7 @@ def session_key(s, token):
     check(r.status_code == 200 and r.json().get("status") == "completed", "session completed", r)
     info = r.json()
     key, user_id = info["apiKey"], info["userID"]
+    SECRETS.append(key)
     check(bool(key) and user_id, f"got API key for userID {user_id}")
     return key, user_id
 
